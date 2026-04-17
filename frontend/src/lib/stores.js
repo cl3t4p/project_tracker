@@ -32,9 +32,20 @@ export const filteredTasks = derived(
   }
 );
 
+function compareTasks(a, b) {
+  const FAR = '9999-12-31';
+  const ad = a.due_date || FAR;
+  const bd = b.due_date || FAR;
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  const ao = a.order_index ?? 0;
+  const bo = b.order_index ?? 0;
+  if (ao !== bo) return ao - bo;
+  return (a.created_at || '').localeCompare(b.created_at || '');
+}
+
 export function tasksByStatus(status) {
   return derived(filteredTasks, ($ft) =>
-    $ft.filter((t) => t.status === status)
+    $ft.filter((t) => t.status === status).slice().sort(compareTasks)
   );
 }
 

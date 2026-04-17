@@ -43,7 +43,8 @@
     <div class="sidebar-header">
       <h2>Projects</h2>
       <div class="sidebar-actions">
-        <button class="btn-new" on:click={() => dispatch('newProject')}>+</button>
+        <button class="btn-new" title="New project from PDF" on:click={() => dispatch('newProjectFromPdf')}>&#128196;</button>
+        <button class="btn-new" title="New project" on:click={() => dispatch('newProject')}>+</button>
         <button class="btn-close" on:click={() => ($sidebarOpen = false)}>&#x2715;</button>
       </div>
     </div>
@@ -63,11 +64,18 @@
         >
           <div class="project-top">
             <span class="project-name">{proj.name}</span>
-            <button
-              class="btn-gear"
-              on:click|stopPropagation={() => dispatch('editProject', proj)}
-              title="Edit project"
-            >&#9881;</button>
+            <div class="card-actions">
+              <button
+                class="btn-gear"
+                on:click|stopPropagation={() => dispatch('aiTasks', proj)}
+                title="Generate tasks with AI"
+              >&#10024;</button>
+              <button
+                class="btn-gear"
+                on:click|stopPropagation={() => dispatch('editProject', proj)}
+                title="Edit project"
+              >&#9881;</button>
+            </div>
           </div>
           <span class="project-course">{proj.course}</span>
 
@@ -206,6 +214,11 @@
   .btn-gear:hover {
     opacity: 1;
     color: var(--accent);
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 0.3rem;
   }
 
 

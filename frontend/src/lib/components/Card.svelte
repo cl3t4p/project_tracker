@@ -24,7 +24,8 @@
     });
   }
 
-  $: deadline = project?.deadline;
+  $: deadline = task.due_date || project?.deadline;
+  $: isTaskDate = !!task.due_date;
   $: daysLeft = deadline ? daysUntilDeadline(deadline) : null;
   $: deadlineClass =
     task.status === 'done'
@@ -80,7 +81,9 @@
           {daysLeft}d left
         {/if}
       </span>
-      <span class="date">{formatDate(deadline)}</span>
+      <span class="date" title={isTaskDate ? 'Task target date' : 'Project deadline'}>
+        {isTaskDate ? '' : '~ '}{formatDate(deadline)}
+      </span>
     </div>
   {/if}
 </div>

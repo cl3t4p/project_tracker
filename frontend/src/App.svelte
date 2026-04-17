@@ -11,11 +11,15 @@
   import Column from './lib/components/Column.svelte';
   import Modal from './lib/components/Modal.svelte';
   import ProjectModal from './lib/components/ProjectModal.svelte';
+  import AiTasksModal from './lib/components/AiTasksModal.svelte';
+  import AiProjectPdfModal from './lib/components/AiProjectPdfModal.svelte';
 
   let showTaskModal = false;
   let editingTask = null;
   let showProjectModal = false;
   let editingProject = null;
+  let aiTasksProject = null;
+  let showAiPdfModal = false;
 
   const columns = [
     { status: 'todo', title: 'To Do' },
@@ -100,6 +104,20 @@
     await loadData();
   }
 
+  // AI handlers
+  function openAiTasks(e) {
+    aiTasksProject = e.detail;
+  }
+
+  function openAiPdf() {
+    showAiPdfModal = true;
+  }
+
+  async function handleAiCreated() {
+    aiTasksProject = null;
+    showAiPdfModal = false;
+    await loadData();
+  }
 </script>
 
 <div class="app">
@@ -119,7 +137,12 @@
   </header>
 
   <div class="content">
-    <Sidebar on:newProject={openNewProject} on:editProject={openEditProject} />
+    <Sidebar
+      on:newProject={openNewProject}
+      on:editProject={openEditProject}
+      on:aiTasks={openAiTasks}
+      on:newProjectFromPdf={openAiPdf}
+    />
 
     <main class="board">
       {#each columns as col}
@@ -149,6 +172,21 @@
     on:save={handleSaveProject}
     on:delete={handleDeleteProject}
     on:close={() => (showProjectModal = false)}
+  />
+{/if}
+
+{#if aiTasksProject}
+  <AiTasksModal
+    project={aiTasksProject}
+    on:created={handleAiCreated}
+    on:close={() => (aiTasksProject = null)}
+  />
+{/if}
+
+{#if showAiPdfModal}
+  <AiProjectPdfModal
+    on:created={handleAiCreated}
+    on:close={() => (showAiPdfModal = false)}
   />
 {/if}
 

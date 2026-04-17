@@ -12,6 +12,7 @@
   let description = task?.description || '';
   let priority = task?.priority || 'medium';
   let status = task?.status || 'todo';
+  let due_date = task?.due_date || '';
 
   function handleSubmit() {
     if (!name.trim() || !project_id) return;
@@ -22,6 +23,7 @@
       description: description.trim(),
       priority,
       status,
+      due_date,
     });
   }
 
@@ -83,6 +85,11 @@
           </select>
         </label>
       </div>
+
+      <label>
+        <span>Target finish date</span>
+        <input type="date" bind:value={due_date} />
+      </label>
 
       <div class="actions">
         {#if isEdit}
