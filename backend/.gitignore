@@ -1,0 +1,4 @@
+.vscode/
+projects.db
+Cargo.lock
+target/
