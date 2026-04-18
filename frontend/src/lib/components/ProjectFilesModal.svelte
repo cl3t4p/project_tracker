@@ -9,14 +9,19 @@
 
   let showAddLink = false;
   let showAddPdf = false;
+  let showAddFile = false;
   let linkName = '';
   let linkUrl = '';
   let pdfName = '';
   let pdfFile = null;
+  let fileName = '';
+  let fileBlob = null;
   let uploading = false;
+  let uploadingFile = false;
 
   $: links = $projectFiles.filter(f => f.file_type === 'link');
   $: pdfs = $projectFiles.filter(f => f.file_type === 'pdf');
+  $: genericFiles = $projectFiles.filter(f => f.file_type === 'file');
 
   onMount(loadFiles);
 
@@ -43,13 +48,29 @@
     uploading = true;
     try {
       const b64 = await fileToBase64(pdfFile);
-      await uploadProjectFile(project.id, pdfName.trim(), b64);
+      await uploadProjectFile(project.id, pdfName.trim(), b64, pdfFile.name);
       pdfName = '';
       pdfFile = null;
       showAddPdf = false;
       await loadFiles();
     } finally {
       uploading = false;
+    }
+  }
+
+  async function handleAddFile() {
+    if (!fileBlob) return;
+    uploadingFile = true;
+    try {
+      const b64 = await fileToBase64(fileBlob);
+      const displayName = fileName.trim() || fileBlob.name;
+      await uploadProjectFile(project.id, displayName, b64, fileBlob.name);
+      fileName = '';
+      fileBlob = null;
+      showAddFile = false;
+      await loadFiles();
+    } finally {
+      uploadingFile = false;
     }
   }
 
@@ -61,6 +82,14 @@
 
   function handleKeydown(e) {
     if (e.key === 'Escape') dispatch('close');
+  }
+
+  function fileExt(f) {
+    const src = f.url || f.name || '';
+    const i = src.lastIndexOf('.');
+    if (i < 0 || i === src.length - 1) return '';
+    const ext = src.slice(i + 1).split(/[?#]/)[0].toLowerCase();
+    return /^[a-z0-9]{1,8}$/.test(ext) ? ext : '';
   }
 </script>
 
@@ -81,7 +110,7 @@
       <section class="files-section">
         <div class="section-header">
           <h3>&#128279; Links</h3>
-          <button class="btn-add-small" on:click={() => { showAddLink = !showAddLink; showAddPdf = false; }}>
+          <button class="btn-add-small" on:click={() => { showAddLink = !showAddLink; showAddPdf = false; showAddFile = false; }}>
             {showAddLink ? 'Cancel' : '+ Add Link'}
           </button>
         </div>
@@ -112,7 +141,7 @@
       <section class="files-section">
         <div class="section-header">
           <h3>&#128196; PDF Attachments</h3>
-          <button class="btn-add-small" on:click={() => { showAddPdf = !showAddPdf; showAddLink = false; }}>
+          <button class="btn-add-small" on:click={() => { showAddPdf = !showAddPdf; showAddLink = false; showAddFile = false; }}>
             {showAddPdf ? 'Cancel' : '+ Upload PDF'}
           </button>
         </div>
@@ -134,10 +163,45 @@
             <div class="file-item">
               <span class="file-icon">&#128196;</span>
               <a href={pdf.url} target="_blank" rel="noopener noreferrer" class="file-name">{pdf.name}</a>
+              {#if fileExt(pdf)}<span class="file-ext">.{fileExt(pdf)}</span>{/if}
               <button class="btn-remove" on:click={() => handleDeleteFile(pdf)} title="Remove">&#x2715;</button>
             </div>
           {:else}
             <p class="empty-text">No PDFs yet</p>
+          {/each}
+        </div>
+      </section>
+
+      <section class="files-section">
+        <div class="section-header">
+          <h3>&#128206; Files</h3>
+          <button class="btn-add-small" on:click={() => { showAddFile = !showAddFile; showAddLink = false; showAddPdf = false; }}>
+            {showAddFile ? 'Cancel' : '+ Upload File'}
+          </button>
+        </div>
+
+        {#if showAddFile}
+          <form class="add-form" on:submit|preventDefault={handleAddFile}>
+            <input type="text" bind:value={fileName} placeholder="Display name (optional)" />
+            <input type="file" on:change={e => fileBlob = e.target.files[0]} required />
+            <div class="form-actions">
+              <button type="submit" class="btn-save-small" disabled={uploadingFile}>
+                {uploadingFile ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+          </form>
+        {/if}
+
+        <div class="file-list">
+          {#each genericFiles as file (file.id)}
+            <div class="file-item">
+              <span class="file-icon">&#128206;</span>
+              <a href={file.url} target="_blank" rel="noopener noreferrer" class="file-name">{file.name}</a>
+              {#if fileExt(file)}<span class="file-ext">.{fileExt(file)}</span>{/if}
+              <button class="btn-remove" on:click={() => handleDeleteFile(file)} title="Remove">&#x2715;</button>
+            </div>
+          {:else}
+            <p class="empty-text">No files yet</p>
           {/each}
         </div>
       </section>
@@ -337,6 +401,19 @@
   }
 
   .file-name:hover { text-decoration: underline; }
+
+  .file-ext {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
 
   .btn-remove {
     background: none;

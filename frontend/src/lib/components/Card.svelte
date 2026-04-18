@@ -81,7 +81,7 @@
           on:click|stopPropagation={() => openFile(f)}
           on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ') openFile(f); }}
         >
-          <span class="chip-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'}</span>
+          <span class="chip-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : f.file_type === 'file' ? '\u{1F4CE}' : '\u{1F517}'}</span>
           <span class="chip-label">{f.name}</span>
         </button>
       {/each}

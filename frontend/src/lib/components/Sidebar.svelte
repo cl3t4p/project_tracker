@@ -76,11 +76,6 @@
               >&#128206;</button>
               <button
                 class="btn-gear"
-                on:click|stopPropagation={() => dispatch('aiTasks', proj)}
-                title="Generate tasks with AI"
-              >&#10024;</button>
-              <button
-                class="btn-gear"
                 on:click|stopPropagation={() => dispatch('editProject', proj)}
                 title="Edit project"
               >&#9881;</button>

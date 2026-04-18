@@ -736,7 +736,8 @@ async fn bulk_create_tasks(
 struct UploadProjectFile {
     project_id: String,
     name: String,
-    data_base64: String, // base64-encoded PDF content
+    data_base64: String, // base64-encoded file content
+    filename: Option<String>, // original filename (used to preserve extension)
 }
 
 fn files_dir() -> std::path::PathBuf {
@@ -823,9 +824,17 @@ async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadPr
     };
 
     let file_id = Uuid::new_v4().to_string();
-    let filename = format!("{}.pdf", file_id);
+    let ext = body
+        .filename
+        .as_deref()
+        .and_then(|f| std::path::Path::new(f).extension().and_then(|e| e.to_str()))
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_else(|| "pdf".to_string());
+    let stored_name = format!("{}.{}", file_id, ext);
+    let file_type = if ext == "pdf" { "pdf" } else { "file" };
     let dir = files_dir();
-    let filepath = dir.join(&filename);
+    let filepath = dir.join(&stored_name);
 
     if let Err(e) = std::fs::write(&filepath, &decoded) {
         return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("Failed to write file: {}", e)}));
@@ -835,8 +844,8 @@ async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadPr
         id: file_id,
         project_id: body.project_id.clone(),
         name: body.name.clone(),
-        file_type: "pdf".to_string(),
-        url: format!("/api/files/{}", filename),
+        file_type: file_type.to_string(),
+        url: format!("/api/files/{}", stored_name),
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -848,6 +857,35 @@ async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadPr
     HttpResponse::Created().json(file)
 }
 
+fn content_type_for(ext: &str) -> &'static str {
+    match ext {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" | "md" | "log" => "text/plain; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "html" | "htm" => "text/html; charset=utf-8",
+        "zip" => "application/zip",
+        "tar" => "application/x-tar",
+        "gz" | "tgz" => "application/gzip",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "wav" => "audio/wav",
+        _ => "application/octet-stream",
+    }
+}
+
 async fn serve_file(path: web::Path<String>) -> HttpResponse {
     let filename = path.into_inner();
     // Prevent directory traversal
@@ -856,9 +894,14 @@ async fn serve_file(path: web::Path<String>) -> HttpResponse {
     }
     let dir = files_dir();
     let filepath = dir.join(&filename);
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
     match std::fs::read(&filepath) {
         Ok(data) => HttpResponse::Ok()
-            .content_type("application/pdf")
+            .content_type(content_type_for(&ext))
             .append_header(("Content-Disposition", format!("inline; filename=\"{}\"", filename)))
             .body(data),
         Err(_) => HttpResponse::NotFound().json(serde_json::json!({"error": "File not found"})),
@@ -881,9 +924,9 @@ async fn delete_project_file(data: web::Data<AppState>, path: web::Path<String>)
         return HttpResponse::NotFound().json(serde_json::json!({"error": "File not found"}));
     }
 
-    // Clean up from disk if it's a PDF
+    // Clean up from disk for any stored file (not links)
     if let Ok((file_type, url)) = file_info {
-        if file_type == "pdf" {
+        if file_type != "link" {
             if let Some(filename) = url.strip_prefix("/api/files/") {
                 let filepath = files_dir().join(filename);
                 std::fs::remove_file(filepath).ok();

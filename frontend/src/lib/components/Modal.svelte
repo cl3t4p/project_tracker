@@ -145,7 +145,7 @@
               <option value="" disabled>+ Add a file…</option>
               {#each unselectedFiles as f (f.id)}
                 <option value={f.id}>
-                  {f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'} {f.name}
+                  {f.file_type === 'pdf' ? '\u{1F4C4}' : f.file_type === 'file' ? '\u{1F4CE}' : '\u{1F517}'} {f.name}
                 </option>
               {/each}
             </select>
@@ -155,7 +155,7 @@
             <div class="files-selected-list">
               {#each selectedFiles as f (f.id)}
                 <div class="files-selected-item">
-                  <span class="files-selected-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'}</span>
+                  <span class="files-selected-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : f.file_type === 'file' ? '\u{1F4CE}' : '\u{1F517}'}</span>
                   <span class="files-selected-name">{f.name}</span>
                   <button
                     type="button"

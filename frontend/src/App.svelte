@@ -126,10 +126,6 @@
   }
 
   // AI handlers
-  function openAiTasks(e) {
-    aiTasksProject = e.detail;
-  }
-
   function openAiPdf() {
     showAiPdfModal = true;
   }
@@ -161,7 +157,6 @@
     <Sidebar
       on:newProject={openNewProject}
       on:editProject={openEditProject}
-      on:aiTasks={openAiTasks}
       on:newProjectFromPdf={openAiPdf}
       on:openProject={openProjectDetail}
       on:openFiles={openFilesModal}
@@ -203,6 +198,7 @@
     project={editingProject}
     on:save={handleSaveProject}
     on:delete={handleDeleteProject}
+    on:aiTasks={(e) => { showProjectModal = false; aiTasksProject = e.detail; }}
     on:close={() => (showProjectModal = false)}
   />
 {/if}

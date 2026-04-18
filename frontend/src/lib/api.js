@@ -81,11 +81,11 @@ export async function createProjectFile(file) {
   return res.json();
 }
 
-export async function uploadProjectFile(projectId, name, dataBase64) {
+export async function uploadProjectFile(projectId, name, dataBase64, filename = null) {
   const res = await fetch(`${BASE}/project-files/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, name, data_base64: dataBase64 }),
+    body: JSON.stringify({ project_id: projectId, name, data_base64: dataBase64, filename }),
   });
   return res.json();
 }

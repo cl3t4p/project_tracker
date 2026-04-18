@@ -119,7 +119,7 @@
                       rel="noopener noreferrer"
                       class="task-file-link"
                     >
-                      {f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'} {f.name}
+                      {f.file_type === 'pdf' ? '\u{1F4C4}' : f.file_type === 'file' ? '\u{1F4CE}' : '\u{1F517}'} {f.name}
                     </a>
                   {/each}
                 </div>

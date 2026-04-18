@@ -28,6 +28,10 @@
     }
   }
 
+  function handleAiTasks() {
+    dispatch('aiTasks', project);
+  }
+
   function handleKeydown(e) {
     if (e.key === 'Escape') dispatch('close');
   }
@@ -63,6 +67,7 @@
       <div class="actions">
         {#if isEdit}
           <button type="button" class="btn-delete" on:click={handleDelete}>Delete</button>
+          <button type="button" class="btn-ai" on:click={handleAiTasks} title="Generate tasks with AI">&#10024; AI tasks</button>
         {/if}
         <div class="right-actions">
           <button type="button" class="btn-cancel" on:click={() => dispatch('close')}>Cancel</button>
@@ -163,4 +168,13 @@
   .btn-cancel:hover { background: var(--border); }
   .btn-delete { background: #fef2f2; color: #dc2626; }
   .btn-delete:hover { background: #fee2e2; }
+  .btn-ai {
+    background: var(--muted);
+    color: var(--text);
+    margin-left: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .btn-ai:hover { background: var(--border); color: var(--accent); }
 </style>
