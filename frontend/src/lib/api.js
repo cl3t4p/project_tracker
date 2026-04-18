@@ -65,6 +65,35 @@ export async function fetchCourses() {
   return res.json();
 }
 
+// ── Project Files ──
+
+export async function fetchProjectFiles(projectId) {
+  const res = await fetch(`${BASE}/projects/${projectId}/files`);
+  return res.json();
+}
+
+export async function createProjectFile(file) {
+  const res = await fetch(`${BASE}/project-files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(file),
+  });
+  return res.json();
+}
+
+export async function uploadProjectFile(projectId, name, dataBase64) {
+  const res = await fetch(`${BASE}/project-files/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, name, data_base64: dataBase64 }),
+  });
+  return res.json();
+}
+
+export async function deleteProjectFile(id) {
+  await fetch(`${BASE}/project-files/${id}`, { method: 'DELETE' });
+}
+
 // ── AI ──
 
 export async function aiGenerateTasks(

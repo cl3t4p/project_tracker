@@ -12,6 +12,12 @@ export const filterSearch = writable('');
 // Sidebar
 export const sidebarOpen = writable(true);
 
+// Current view: 'board' or { page: 'project', projectId: '...' }
+export const currentView = writable('board');
+
+// Project files (loaded when viewing a project detail page)
+export const projectFiles = writable([]);
+
 // Filtered tasks for the kanban
 export const filteredTasks = derived(
   [tasks, filterProject, filterPriority, filterSearch],

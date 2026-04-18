@@ -1,6 +1,7 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { projects } from '../stores.js';
+  import { fetchProjectFiles } from '../api.js';
 
   export let task = null;
 
@@ -13,6 +14,21 @@
   let priority = task?.priority || 'medium';
   let status = task?.status || 'todo';
   let due_date = task?.due_date || '';
+  let file_id = task?.file_id || '';
+  let availableFiles = [];
+
+  onMount(() => { loadFilesForProject(project_id); });
+
+  async function loadFilesForProject(pid) {
+    if (!pid) { availableFiles = []; return; }
+    try {
+      availableFiles = await fetchProjectFiles(pid);
+    } catch {
+      availableFiles = [];
+    }
+  }
+
+  $: loadFilesForProject(project_id);
 
   function handleSubmit() {
     if (!name.trim() || !project_id) return;
@@ -24,6 +40,7 @@
       priority,
       status,
       due_date,
+      file_id: file_id || '',
     });
   }
 
@@ -90,6 +107,18 @@
         <span>Target finish date</span>
         <input type="date" bind:value={due_date} />
       </label>
+
+      {#if availableFiles.length > 0}
+        <label>
+          <span>Linked file</span>
+          <select bind:value={file_id}>
+            <option value="">None</option>
+            {#each availableFiles as f}
+              <option value={f.id}>{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'} {f.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
 
       <div class="actions">
         {#if isEdit}

@@ -66,6 +66,9 @@
   {#if task.description}
     <p class="card-desc">{task.description}</p>
   {/if}
+  {#if task.file_id}
+    <div class="file-indicator" title="Has linked file">&#128206;</div>
+  {/if}
   {#if deadline}
     <div class="card-footer">
       <span class="deadline {deadlineClass}">
@@ -93,7 +96,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 0.875rem;
+    padding: 1rem 1.1rem;
     cursor: grab;
     transition: box-shadow 0.15s, transform 0.15s;
     border-left: 3px solid var(--border);
@@ -158,19 +161,20 @@
   }
 
   .card-title {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    margin: 0 0 0.35rem;
+    margin: 0 0 0.4rem;
     color: var(--text);
+    line-height: 1.3;
   }
 
   .card-desc {
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     color: var(--text-secondary);
     margin: 0 0 0.5rem;
-    line-height: 1.4;
+    line-height: 1.5;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -195,4 +199,10 @@
   .deadline.done    { color: var(--text-secondary); background: var(--muted); }
 
   .date { color: var(--text-secondary); }
+
+  .file-indicator {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
 </style>

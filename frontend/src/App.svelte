@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { projects, tasks, courses, sidebarOpen } from './lib/stores.js';
+  import { projects, tasks, courses, sidebarOpen, currentView } from './lib/stores.js';
   import {
     fetchProjects, fetchTasks, fetchCourses,
     createProject, updateProject, deleteProject,
@@ -13,6 +13,7 @@
   import ProjectModal from './lib/components/ProjectModal.svelte';
   import AiTasksModal from './lib/components/AiTasksModal.svelte';
   import AiProjectPdfModal from './lib/components/AiProjectPdfModal.svelte';
+  import ProjectDetailPage from './lib/components/ProjectDetailPage.svelte';
 
   let showTaskModal = false;
   let editingTask = null;
@@ -104,6 +105,19 @@
     await loadData();
   }
 
+  // Project detail view
+  $: viewProject = typeof $currentView === 'object' && $currentView.page === 'project'
+    ? $projects.find(p => p.id === $currentView.projectId) || null
+    : null;
+
+  function openProjectDetail(e) {
+    $currentView = { page: 'project', projectId: e.detail.id };
+  }
+
+  function handleBackToBoard() {
+    $currentView = 'board';
+  }
+
   // AI handlers
   function openAiTasks(e) {
     aiTasksProject = e.detail;
@@ -142,18 +156,27 @@
       on:editProject={openEditProject}
       on:aiTasks={openAiTasks}
       on:newProjectFromPdf={openAiPdf}
+      on:openProject={openProjectDetail}
     />
 
-    <main class="board">
-      {#each columns as col}
-        <Column
-          status={col.status}
-          title={col.title}
-          on:edit={openEditTask}
-          on:drop={handleDrop}
-        />
-      {/each}
-    </main>
+    {#if viewProject}
+      <ProjectDetailPage
+        project={viewProject}
+        on:back={handleBackToBoard}
+        on:editProject={(e) => openEditProject(e)}
+      />
+    {:else}
+      <main class="board">
+        {#each columns as col}
+          <Column
+            status={col.status}
+            title={col.title}
+            on:edit={openEditTask}
+            on:drop={handleDrop}
+          />
+        {/each}
+      </main>
+    {/if}
   </div>
 </div>
 

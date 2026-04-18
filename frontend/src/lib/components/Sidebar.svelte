@@ -63,7 +63,11 @@
           tabindex="0"
         >
           <div class="project-top">
-            <span class="project-name">{proj.name}</span>
+            <button
+              class="project-name-btn"
+              on:click|stopPropagation={() => dispatch('openProject', proj)}
+              title="View project details"
+            >{proj.name}</button>
             <div class="card-actions">
               <button
                 class="btn-gear"
@@ -192,11 +196,21 @@
     align-items: flex-start;
   }
 
-  .project-name {
+  .project-name-btn {
     font-weight: 600;
     font-size: 0.875rem;
     color: var(--text);
     margin-bottom: 0.2rem;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    transition: color 0.15s;
+  }
+
+  .project-name-btn:hover {
+    color: var(--accent);
   }
 
   .btn-gear {
