@@ -2,4 +2,5 @@
 projects.db
 Cargo.lock
 target/
+files/
 .idea/
