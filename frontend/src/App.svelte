@@ -14,6 +14,7 @@
   import AiTasksModal from './lib/components/AiTasksModal.svelte';
   import AiProjectPdfModal from './lib/components/AiProjectPdfModal.svelte';
   import ProjectDetailPage from './lib/components/ProjectDetailPage.svelte';
+  import ProjectFilesModal from './lib/components/ProjectFilesModal.svelte';
 
   let showTaskModal = false;
   let editingTask = null;
@@ -21,6 +22,7 @@
   let editingProject = null;
   let aiTasksProject = null;
   let showAiPdfModal = false;
+  let filesProject = null;
 
   const columns = [
     { status: 'todo', title: 'To Do' },
@@ -118,6 +120,11 @@
     $currentView = 'board';
   }
 
+  // Files modal
+  function openFilesModal(e) {
+    filesProject = e.detail;
+  }
+
   // AI handlers
   function openAiTasks(e) {
     aiTasksProject = e.detail;
@@ -157,6 +164,7 @@
       on:aiTasks={openAiTasks}
       on:newProjectFromPdf={openAiPdf}
       on:openProject={openProjectDetail}
+      on:openFiles={openFilesModal}
     />
 
     {#if viewProject}
@@ -164,6 +172,7 @@
         project={viewProject}
         on:back={handleBackToBoard}
         on:editProject={(e) => openEditProject(e)}
+        on:openFiles={openFilesModal}
       />
     {:else}
       <main class="board">
@@ -210,6 +219,13 @@
   <AiProjectPdfModal
     on:created={handleAiCreated}
     on:close={() => (showAiPdfModal = false)}
+  />
+{/if}
+
+{#if filesProject}
+  <ProjectFilesModal
+    project={filesProject}
+    on:close={() => (filesProject = null)}
   />
 {/if}
 

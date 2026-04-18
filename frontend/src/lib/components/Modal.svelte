@@ -8,14 +8,22 @@
   const dispatch = createEventDispatcher();
   const isEdit = !!task;
 
+  function todayStr() {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+
   let project_id = task?.project_id || ($projects.length > 0 ? $projects[0].id : '');
   let name = task?.name || '';
   let description = task?.description || '';
   let priority = task?.priority || 'medium';
   let status = task?.status || 'todo';
-  let due_date = task?.due_date || '';
-  let file_id = task?.file_id || '';
+  let due_date = task?.due_date || (isEdit ? '' : todayStr());
+  let selectedFileIds = (task?.files || []).map((f) => f.id);
   let availableFiles = [];
+  let prevProjectId = project_id;
 
   onMount(() => { loadFilesForProject(project_id); });
 
@@ -28,7 +36,13 @@
     }
   }
 
-  $: loadFilesForProject(project_id);
+  $: {
+    if (project_id !== prevProjectId) {
+      selectedFileIds = [];
+      prevProjectId = project_id;
+    }
+    loadFilesForProject(project_id);
+  }
 
   function handleSubmit() {
     if (!name.trim() || !project_id) return;
@@ -40,7 +54,7 @@
       priority,
       status,
       due_date,
-      file_id: file_id || '',
+      file_ids: selectedFileIds,
     });
   }
 
@@ -109,15 +123,53 @@
       </label>
 
       {#if availableFiles.length > 0}
-        <label>
-          <span>Linked file</span>
-          <select bind:value={file_id}>
-            <option value="">None</option>
-            {#each availableFiles as f}
-              <option value={f.id}>{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'} {f.name}</option>
-            {/each}
-          </select>
-        </label>
+        {@const selectedFiles = selectedFileIds
+          .map((id) => availableFiles.find((f) => f.id === id))
+          .filter(Boolean)}
+        {@const unselectedFiles = availableFiles.filter((f) => !selectedFileIds.includes(f.id))}
+        <div class="files-field">
+          <span class="files-label">Linked files ({selectedFileIds.length})</span>
+
+          {#if unselectedFiles.length > 0}
+            <select
+              class="files-add-select"
+              value=""
+              on:change={(e) => {
+                const v = e.target.value;
+                if (v) {
+                  selectedFileIds = [...selectedFileIds, v];
+                  e.target.value = '';
+                }
+              }}
+            >
+              <option value="" disabled>+ Add a file…</option>
+              {#each unselectedFiles as f (f.id)}
+                <option value={f.id}>
+                  {f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'} {f.name}
+                </option>
+              {/each}
+            </select>
+          {/if}
+
+          {#if selectedFiles.length > 0}
+            <div class="files-selected-list">
+              {#each selectedFiles as f (f.id)}
+                <div class="files-selected-item">
+                  <span class="files-selected-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'}</span>
+                  <span class="files-selected-name">{f.name}</span>
+                  <button
+                    type="button"
+                    class="files-remove-btn"
+                    title="Remove"
+                    on:click={() => { selectedFileIds = selectedFileIds.filter((id) => id !== f.id); }}
+                  >&#x2715;</button>
+                </div>
+              {/each}
+            </div>
+          {:else if unselectedFiles.length > 0}
+            <p class="files-empty">No files attached to this task yet.</p>
+          {/if}
+        </div>
       {/if}
 
       <div class="actions">
@@ -177,6 +229,7 @@
   label em { color: #ef4444; font-style: normal; }
 
   input[type='text'],
+  input[type='date'],
   textarea,
   select {
     padding: 0.6rem 0.75rem;
@@ -186,6 +239,7 @@
     color: var(--text);
     font-size: 0.875rem;
     font-family: inherit;
+    color-scheme: light dark;
   }
 
   input:focus, textarea:focus, select:focus {
@@ -198,6 +252,80 @@
 
   .row { display: flex; gap: 0.75rem; }
   .flex-1 { flex: 1; }
+
+  .files-field { margin-bottom: 1rem; }
+
+  .files-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+  }
+
+  .files-add-select {
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+
+  .files-selected-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.4rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .files-selected-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--muted);
+    border-radius: 6px;
+  }
+
+  .files-selected-icon { flex-shrink: 0; font-size: 0.95rem; }
+
+  .files-selected-name {
+    flex: 1;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .files-remove-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.45rem;
+    border-radius: 4px;
+    opacity: 0.5;
+    transition: all 0.15s;
+  }
+
+  .files-remove-btn:hover {
+    opacity: 1;
+    color: #dc2626;
+    background: #fef2f2;
+  }
+
+  .files-empty {
+    margin: 0;
+    padding: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-align: center;
+  }
 
   .actions {
     display: flex;

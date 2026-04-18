@@ -3,6 +3,7 @@ use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -32,6 +33,26 @@ struct Task {
     due_date: Option<String>, // YYYY-MM-DD
     order_index: i64,
     created_at: String,
+    #[serde(default)]
+    files: Vec<TaskFile>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct TaskFile {
+    id: String,
+    name: String,
+    url: String,
+    file_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ProjectFile {
+    id: String,
+    project_id: String,
+    name: String,
+    file_type: String, // "link" or "pdf"
+    url: String,
+    created_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +80,15 @@ struct CreateTask {
     status: Option<String>,
     due_date: Option<String>,
     order_index: Option<i64>,
+    file_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateProjectFile {
+    project_id: String,
+    name: String,
+    file_type: String,
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +100,7 @@ struct UpdateTaskBody {
     status: Option<String>,
     due_date: Option<String>,
     order_index: Option<i64>,
+    file_ids: Option<Vec<String>>,
 }
 
 struct AppState {
@@ -97,7 +128,21 @@ fn init_db(conn: &Connection) {
             status TEXT NOT NULL DEFAULT 'todo',
             due_date TEXT,
             order_index INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            file_id TEXT REFERENCES project_files(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_files (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            file_type TEXT NOT NULL DEFAULT 'link',
+            url TEXT NOT NULL,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS task_files (
+            task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            file_id TEXT NOT NULL REFERENCES project_files(id) ON DELETE CASCADE,
+            PRIMARY KEY (task_id, file_id)
         );
         PRAGMA foreign_keys = ON;",
     )
@@ -105,6 +150,14 @@ fn init_db(conn: &Connection) {
 
     ensure_column(conn, "tasks", "due_date", "TEXT");
     ensure_column(conn, "tasks", "order_index", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "tasks", "file_id", "TEXT");
+
+    // Migrate any legacy single-file attachments into the junction table
+    conn.execute(
+        "INSERT OR IGNORE INTO task_files (task_id, file_id)
+         SELECT id, file_id FROM tasks WHERE file_id IS NOT NULL AND file_id != ''",
+        [],
+    ).ok();
 }
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, type_sql: &str) {
@@ -233,7 +286,7 @@ async fn get_tasks(data: web::Data<AppState>) -> HttpResponse {
         )
         .unwrap();
 
-    let tasks: Vec<Task> = stmt
+    let mut tasks: Vec<Task> = stmt
         .query_map([], |row| {
             Ok(Task {
                 id: row.get(0)?,
@@ -245,11 +298,46 @@ async fn get_tasks(data: web::Data<AppState>) -> HttpResponse {
                 due_date: row.get(6)?,
                 order_index: row.get(7)?,
                 created_at: row.get(8)?,
+                files: Vec::new(),
             })
         })
         .unwrap()
         .filter_map(|r| r.ok())
         .collect();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT tf.task_id, pf.id, pf.name, pf.url, pf.file_type
+             FROM task_files tf
+             JOIN project_files pf ON pf.id = tf.file_id
+             ORDER BY pf.created_at ASC",
+        )
+        .unwrap();
+
+    let mut by_task: HashMap<String, Vec<TaskFile>> = HashMap::new();
+    for row in stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                TaskFile {
+                    id: row.get(1)?,
+                    name: row.get(2)?,
+                    url: row.get(3)?,
+                    file_type: row.get(4)?,
+                },
+            ))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+    {
+        by_task.entry(row.0).or_default().push(row.1);
+    }
+
+    for task in &mut tasks {
+        if let Some(files) = by_task.remove(&task.id) {
+            task.files = files;
+        }
+    }
 
     HttpResponse::Ok().json(tasks)
 }
@@ -278,6 +366,7 @@ async fn create_task(data: web::Data<AppState>, body: web::Json<CreateTask>) -> 
         due_date: body.due_date.clone().filter(|s| !s.is_empty()),
         order_index: body.order_index.unwrap_or(next_order),
         created_at: chrono::Utc::now().to_rfc3339(),
+        files: Vec::new(),
     };
 
     conn.execute(
@@ -288,6 +377,15 @@ async fn create_task(data: web::Data<AppState>, body: web::Json<CreateTask>) -> 
             task.status, task.due_date, task.order_index, task.created_at
         ],
     ).unwrap();
+
+    if let Some(ids) = &body.file_ids {
+        for fid in ids.iter().filter(|s| !s.is_empty()) {
+            conn.execute(
+                "INSERT OR IGNORE INTO task_files (task_id, file_id) VALUES (?1, ?2)",
+                rusqlite::params![task.id, fid],
+            ).ok();
+        }
+    }
 
     HttpResponse::Created().json(task)
 }
@@ -336,8 +434,17 @@ async fn update_task(data: web::Data<AppState>, path: web::Path<String>, body: w
     if let Some(v) = body.order_index {
         conn.execute("UPDATE tasks SET order_index = ?1 WHERE id = ?2", rusqlite::params![v, id]).unwrap();
     }
+    if let Some(ids) = &body.file_ids {
+        conn.execute("DELETE FROM task_files WHERE task_id = ?1", rusqlite::params![id]).unwrap();
+        for fid in ids.iter().filter(|s| !s.is_empty()) {
+            conn.execute(
+                "INSERT OR IGNORE INTO task_files (task_id, file_id) VALUES (?1, ?2)",
+                rusqlite::params![id, fid],
+            ).ok();
+        }
+    }
 
-    let task = conn
+    let mut task = conn
         .query_row(
             "SELECT id, project_id, name, description, priority, status, due_date, order_index, created_at FROM tasks WHERE id = ?1",
             rusqlite::params![id],
@@ -345,9 +452,32 @@ async fn update_task(data: web::Data<AppState>, path: web::Path<String>, body: w
                 id: row.get(0)?, project_id: row.get(1)?, name: row.get(2)?,
                 description: row.get(3)?, priority: row.get(4)?, status: row.get(5)?,
                 due_date: row.get(6)?, order_index: row.get(7)?, created_at: row.get(8)?,
+                files: Vec::new(),
             }),
         )
         .unwrap();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT pf.id, pf.name, pf.url, pf.file_type
+             FROM task_files tf
+             JOIN project_files pf ON pf.id = tf.file_id
+             WHERE tf.task_id = ?1
+             ORDER BY pf.created_at ASC",
+        )
+        .unwrap();
+    task.files = stmt
+        .query_map(rusqlite::params![id], |row| {
+            Ok(TaskFile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                url: row.get(2)?,
+                file_type: row.get(3)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
 
     HttpResponse::Ok().json(task)
 }
@@ -583,6 +713,7 @@ async fn bulk_create_tasks(
             due_date: item.due_date.clone().filter(|s| !s.is_empty()),
             order_index: next_order,
             created_at: now.clone(),
+            files: Vec::new(),
         };
         conn.execute(
             "INSERT INTO tasks (id, project_id, name, description, priority, status, due_date, order_index, created_at)
@@ -597,6 +728,170 @@ async fn bulk_create_tasks(
     }
 
     HttpResponse::Created().json(created)
+}
+
+// ── Project Files ──
+
+#[derive(Debug, Deserialize)]
+struct UploadProjectFile {
+    project_id: String,
+    name: String,
+    data_base64: String, // base64-encoded PDF content
+}
+
+fn files_dir() -> std::path::PathBuf {
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "projects.db".to_string());
+    let parent = std::path::Path::new(&db_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let dir = parent.join("files");
+    std::fs::create_dir_all(&dir).ok();
+    dir
+}
+
+async fn get_project_files(data: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let project_id = path.into_inner();
+
+    let mut stmt = conn
+        .prepare("SELECT id, project_id, name, file_type, url, created_at FROM project_files WHERE project_id = ?1 ORDER BY created_at ASC")
+        .unwrap();
+
+    let files: Vec<ProjectFile> = stmt
+        .query_map(rusqlite::params![project_id], |row| {
+            Ok(ProjectFile {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                name: row.get(2)?,
+                file_type: row.get(3)?,
+                url: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    HttpResponse::Ok().json(files)
+}
+
+async fn create_project_file(data: web::Data<AppState>, body: web::Json<CreateProjectFile>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+
+    let exists: bool = conn
+        .query_row("SELECT COUNT(*) FROM projects WHERE id = ?1", rusqlite::params![body.project_id], |row| row.get::<_, i64>(0))
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !exists {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Project not found"}));
+    }
+
+    let file = ProjectFile {
+        id: Uuid::new_v4().to_string(),
+        project_id: body.project_id.clone(),
+        name: body.name.clone(),
+        file_type: body.file_type.clone(),
+        url: body.url.clone(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    conn.execute(
+        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at],
+    ).unwrap();
+
+    HttpResponse::Created().json(file)
+}
+
+async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadProjectFile>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+
+    let exists: bool = conn
+        .query_row("SELECT COUNT(*) FROM projects WHERE id = ?1", rusqlite::params![body.project_id], |row| row.get::<_, i64>(0))
+        .map(|c| c > 0)
+        .unwrap_or(false);
+
+    if !exists {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Project not found"}));
+    }
+
+    use base64::Engine;
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(&body.data_base64) {
+        Ok(d) => d,
+        Err(_) => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid base64 data"})),
+    };
+
+    let file_id = Uuid::new_v4().to_string();
+    let filename = format!("{}.pdf", file_id);
+    let dir = files_dir();
+    let filepath = dir.join(&filename);
+
+    if let Err(e) = std::fs::write(&filepath, &decoded) {
+        return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("Failed to write file: {}", e)}));
+    }
+
+    let file = ProjectFile {
+        id: file_id,
+        project_id: body.project_id.clone(),
+        name: body.name.clone(),
+        file_type: "pdf".to_string(),
+        url: format!("/api/files/{}", filename),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    conn.execute(
+        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at],
+    ).unwrap();
+
+    HttpResponse::Created().json(file)
+}
+
+async fn serve_file(path: web::Path<String>) -> HttpResponse {
+    let filename = path.into_inner();
+    // Prevent directory traversal
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid filename"}));
+    }
+    let dir = files_dir();
+    let filepath = dir.join(&filename);
+    match std::fs::read(&filepath) {
+        Ok(data) => HttpResponse::Ok()
+            .content_type("application/pdf")
+            .append_header(("Content-Disposition", format!("inline; filename=\"{}\"", filename)))
+            .body(data),
+        Err(_) => HttpResponse::NotFound().json(serde_json::json!({"error": "File not found"})),
+    }
+}
+
+async fn delete_project_file(data: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let id = path.into_inner();
+
+    // Get the file info before deleting (to clean up from disk)
+    let file_info = conn.query_row(
+        "SELECT file_type, url FROM project_files WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    );
+
+    let rows = conn.execute("DELETE FROM project_files WHERE id = ?1", rusqlite::params![id]).unwrap();
+    if rows == 0 {
+        return HttpResponse::NotFound().json(serde_json::json!({"error": "File not found"}));
+    }
+
+    // Clean up from disk if it's a PDF
+    if let Ok((file_type, url)) = file_info {
+        if file_type == "pdf" {
+            if let Some(filename) = url.strip_prefix("/api/files/") {
+                let filepath = files_dir().join(filename);
+                std::fs::remove_file(filepath).ok();
+            }
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"deleted": id}))
 }
 
 // ── Courses ──
@@ -657,6 +952,11 @@ async fn main() -> std::io::Result<()> {
             .route("/api/ai/manual-prompt/project", web::post().to(manual_prompt_project))
             .route("/api/ai/status", web::get().to(ai_status))
             .route("/api/courses", web::get().to(get_courses))
+            .route("/api/projects/{id}/files", web::get().to(get_project_files))
+            .route("/api/project-files", web::post().to(create_project_file))
+            .route("/api/project-files/upload", web::post().to(upload_project_file))
+            .route("/api/project-files/{id}", web::delete().to(delete_project_file))
+            .route("/api/files/{filename}", web::get().to(serve_file))
             .service(Files::new("/", "./static").index_file("index.html"))
     })
     .bind("0.0.0.0:8080")?

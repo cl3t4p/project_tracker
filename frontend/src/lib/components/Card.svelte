@@ -7,6 +7,11 @@
   const dispatch = createEventDispatcher();
 
   $: project = $projects.find((p) => p.id === task.project_id);
+  $: taskFiles = task.files || [];
+
+  function openFile(f) {
+    if (f && f.url) window.open(f.url, '_blank', 'noopener');
+  }
 
   function daysUntilDeadline(deadline) {
     if (!deadline) return null;
@@ -66,8 +71,21 @@
   {#if task.description}
     <p class="card-desc">{task.description}</p>
   {/if}
-  {#if task.file_id}
-    <div class="file-indicator" title="Has linked file">&#128206;</div>
+  {#if taskFiles.length > 0}
+    <div class="file-chips">
+      {#each taskFiles as f (f.id)}
+        <button
+          type="button"
+          class="file-chip"
+          title="Open {f.name}"
+          on:click|stopPropagation={() => openFile(f)}
+          on:keydown|stopPropagation={(e) => { if (e.key === 'Enter' || e.key === ' ') openFile(f); }}
+        >
+          <span class="chip-icon">{f.file_type === 'pdf' ? '\u{1F4C4}' : '\u{1F517}'}</span>
+          <span class="chip-label">{f.name}</span>
+        </button>
+      {/each}
+    </div>
   {/if}
   {#if deadline}
     <div class="card-footer">
@@ -200,9 +218,38 @@
 
   .date { color: var(--text-secondary); }
 
-  .file-indicator {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.35rem;
+  .file-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    max-width: 100%;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-light);
+    border: none;
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.15s;
+  }
+
+  .file-chip:hover { opacity: 0.8; }
+
+  .chip-icon { flex-shrink: 0; }
+
+  .chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
   }
 </style>

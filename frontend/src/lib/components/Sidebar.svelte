@@ -71,6 +71,11 @@
             <div class="card-actions">
               <button
                 class="btn-gear"
+                on:click|stopPropagation={() => dispatch('openFiles', proj)}
+                title="Files &amp; links"
+              >&#128206;</button>
+              <button
+                class="btn-gear"
                 on:click|stopPropagation={() => dispatch('aiTasks', proj)}
                 title="Generate tasks with AI"
               >&#10024;</button>
