@@ -50,9 +50,65 @@ struct ProjectFile {
     id: String,
     project_id: String,
     name: String,
-    file_type: String, // "link" or "pdf"
+    file_type: String, // "link", "pdf", "file"
     url: String,
     created_at: String,
+    #[serde(default = "default_category")]
+    category: String, // "course", "assignment", "lab", "exam", "other"
+    #[serde(default)]
+    subsection: Option<String>,
+    #[serde(default)]
+    order_index: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Subsection {
+    category: String,
+    name: String,
+    created_at: String,
+    #[serde(default)]
+    order_index: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderSubsectionsBody {
+    category: String,
+    names: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReorderFilesBody {
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateSubsectionBody {
+    category: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubsectionQuery {
+    category: String,
+    name: String,
+}
+
+fn default_category() -> String {
+    "other".to_string()
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct ProjectFileWithContext {
+    #[serde(flatten)]
+    file: ProjectFile,
+    project_name: String,
+    course: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct CourseInfo {
+    name: String,
+    exam_deadline: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +145,30 @@ struct CreateProjectFile {
     name: String,
     file_type: String,
     url: String,
+    category: Option<String>,
+    subsection: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateProjectFileBody {
+    name: Option<String>,
+    category: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    subsection: Option<Option<String>>,
+}
+
+// Distinguish between missing field and explicit null so we can clear the subsection.
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateCourseBody {
+    exam_deadline: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,6 +224,17 @@ fn init_db(conn: &Connection) {
             file_id TEXT NOT NULL REFERENCES project_files(id) ON DELETE CASCADE,
             PRIMARY KEY (task_id, file_id)
         );
+        CREATE TABLE IF NOT EXISTS course_meta (
+            name TEXT PRIMARY KEY,
+            exam_deadline TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS subsections (
+            category TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (category, name)
+        );
         PRAGMA foreign_keys = ON;",
     )
     .expect("Failed to initialize database");
@@ -151,6 +242,10 @@ fn init_db(conn: &Connection) {
     ensure_column(conn, "tasks", "due_date", "TEXT");
     ensure_column(conn, "tasks", "order_index", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "tasks", "file_id", "TEXT");
+    ensure_column(conn, "project_files", "category", "TEXT NOT NULL DEFAULT 'other'");
+    ensure_column(conn, "project_files", "subsection", "TEXT");
+    ensure_column(conn, "project_files", "order_index", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "subsections", "order_index", "INTEGER NOT NULL DEFAULT 0");
 
     // Migrate any legacy single-file attachments into the junction table
     conn.execute(
@@ -738,6 +833,8 @@ struct UploadProjectFile {
     name: String,
     data_base64: String, // base64-encoded file content
     filename: Option<String>, // original filename (used to preserve extension)
+    category: Option<String>,
+    subsection: Option<String>,
 }
 
 fn files_dir() -> std::path::PathBuf {
@@ -755,7 +852,7 @@ async fn get_project_files(data: web::Data<AppState>, path: web::Path<String>) -
     let project_id = path.into_inner();
 
     let mut stmt = conn
-        .prepare("SELECT id, project_id, name, file_type, url, created_at FROM project_files WHERE project_id = ?1 ORDER BY created_at ASC")
+        .prepare("SELECT id, project_id, name, file_type, url, created_at, COALESCE(category, 'other'), subsection, COALESCE(order_index, 0) FROM project_files WHERE project_id = ?1 ORDER BY order_index ASC, created_at ASC")
         .unwrap();
 
     let files: Vec<ProjectFile> = stmt
@@ -767,6 +864,45 @@ async fn get_project_files(data: web::Data<AppState>, path: web::Path<String>) -
                 file_type: row.get(3)?,
                 url: row.get(4)?,
                 created_at: row.get(5)?,
+                category: row.get(6)?,
+                subsection: row.get(7).ok(),
+                order_index: row.get(8)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    HttpResponse::Ok().json(files)
+}
+
+async fn get_all_files(data: web::Data<AppState>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT pf.id, pf.project_id, pf.name, pf.file_type, pf.url, pf.created_at, \
+                    COALESCE(pf.category, 'other'), pf.subsection, COALESCE(pf.order_index, 0), p.name, p.course \
+             FROM project_files pf JOIN projects p ON p.id = pf.project_id \
+             ORDER BY pf.order_index ASC, pf.created_at ASC",
+        )
+        .unwrap();
+
+    let files: Vec<ProjectFileWithContext> = stmt
+        .query_map([], |row| {
+            Ok(ProjectFileWithContext {
+                file: ProjectFile {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    name: row.get(2)?,
+                    file_type: row.get(3)?,
+                    url: row.get(4)?,
+                    created_at: row.get(5)?,
+                    category: row.get(6)?,
+                    subsection: row.get(7).ok(),
+                    order_index: row.get(8)?,
+                },
+                project_name: row.get(9)?,
+                course: row.get(10)?,
             })
         })
         .unwrap()
@@ -788,6 +924,7 @@ async fn create_project_file(data: web::Data<AppState>, body: web::Json<CreatePr
         return HttpResponse::BadRequest().json(serde_json::json!({"error": "Project not found"}));
     }
 
+    let order_index = next_file_order(&conn);
     let file = ProjectFile {
         id: Uuid::new_v4().to_string(),
         project_id: body.project_id.clone(),
@@ -795,14 +932,97 @@ async fn create_project_file(data: web::Data<AppState>, body: web::Json<CreatePr
         file_type: body.file_type.clone(),
         url: body.url.clone(),
         created_at: chrono::Utc::now().to_rfc3339(),
+        category: body.category.clone().unwrap_or_else(default_category),
+        subsection: body.subsection.clone().filter(|s| !s.is_empty()),
+        order_index,
     };
 
     conn.execute(
-        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at],
+        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at, category, subsection, order_index) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at, file.category, file.subsection, file.order_index],
     ).unwrap();
 
     HttpResponse::Created().json(file)
+}
+
+fn next_file_order(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(MAX(order_index), -1) + 1 FROM project_files",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+}
+
+async fn reorder_project_files(
+    data: web::Data<AppState>,
+    body: web::Json<ReorderFilesBody>,
+) -> HttpResponse {
+    let mut conn = data.db.lock().unwrap();
+    let tx = conn.transaction().unwrap();
+    for (i, id) in body.ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE project_files SET order_index = ?1 WHERE id = ?2",
+            rusqlite::params![i as i64, id],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+    HttpResponse::Ok().json(serde_json::json!({"ok": true, "count": body.ids.len()}))
+}
+
+async fn update_project_file(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<UpdateProjectFileBody>,
+) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let id = path.into_inner();
+
+    if let Some(ref name) = body.name {
+        conn.execute(
+            "UPDATE project_files SET name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )
+        .unwrap();
+    }
+    if let Some(ref category) = body.category {
+        conn.execute(
+            "UPDATE project_files SET category = ?1 WHERE id = ?2",
+            rusqlite::params![category, id],
+        )
+        .unwrap();
+    }
+    if let Some(ref sub) = body.subsection {
+        let value = sub.as_ref().map(|s| s.as_str()).filter(|s| !s.is_empty());
+        conn.execute(
+            "UPDATE project_files SET subsection = ?1 WHERE id = ?2",
+            rusqlite::params![value, id],
+        )
+        .unwrap();
+    }
+
+    let result = conn.query_row(
+        "SELECT id, project_id, name, file_type, url, created_at, COALESCE(category, 'other'), subsection, COALESCE(order_index, 0) FROM project_files WHERE id = ?1",
+        rusqlite::params![id],
+        |row| {
+            Ok(ProjectFile {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                name: row.get(2)?,
+                file_type: row.get(3)?,
+                url: row.get(4)?,
+                created_at: row.get(5)?,
+                category: row.get(6)?,
+                subsection: row.get(7).ok(),
+                order_index: row.get(8)?,
+            })
+        },
+    );
+    match result {
+        Ok(file) => HttpResponse::Ok().json(file),
+        Err(_) => HttpResponse::NotFound().json(serde_json::json!({"error": "File not found"})),
+    }
 }
 
 async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadProjectFile>) -> HttpResponse {
@@ -840,6 +1060,7 @@ async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadPr
         return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("Failed to write file: {}", e)}));
     }
 
+    let order_index = next_file_order(&conn);
     let file = ProjectFile {
         id: file_id,
         project_id: body.project_id.clone(),
@@ -847,11 +1068,14 @@ async fn upload_project_file(data: web::Data<AppState>, body: web::Json<UploadPr
         file_type: file_type.to_string(),
         url: format!("/api/files/{}", stored_name),
         created_at: chrono::Utc::now().to_rfc3339(),
+        category: body.category.clone().unwrap_or_else(default_category),
+        subsection: body.subsection.clone().filter(|s| !s.is_empty()),
+        order_index,
     };
 
     conn.execute(
-        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at],
+        "INSERT INTO project_files (id, project_id, name, file_type, url, created_at, category, subsection, order_index) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![file.id, file.project_id, file.name, file.file_type, file.url, file.created_at, file.category, file.subsection, file.order_index],
     ).unwrap();
 
     HttpResponse::Created().json(file)
@@ -954,6 +1178,143 @@ async fn get_courses(data: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(courses)
 }
 
+async fn get_courses_detailed(data: web::Data<AppState>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT p.course, cm.exam_deadline \
+             FROM projects p LEFT JOIN course_meta cm ON cm.name = p.course \
+             ORDER BY p.course ASC",
+        )
+        .unwrap();
+
+    let courses: Vec<CourseInfo> = stmt
+        .query_map([], |row| {
+            Ok(CourseInfo {
+                name: row.get(0)?,
+                exam_deadline: row.get(1).ok(),
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    HttpResponse::Ok().json(courses)
+}
+
+// ── Subsections ──
+
+async fn get_subsections(data: web::Data<AppState>) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let mut stmt = conn
+        .prepare("SELECT category, name, created_at, COALESCE(order_index, 0) FROM subsections ORDER BY category ASC, order_index ASC, name ASC")
+        .unwrap();
+
+    let rows: Vec<Subsection> = stmt
+        .query_map([], |row| {
+            Ok(Subsection {
+                category: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                order_index: row.get(3)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    HttpResponse::Ok().json(rows)
+}
+
+async fn create_subsection(
+    data: web::Data<AppState>,
+    body: web::Json<CreateSubsectionBody>,
+) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let name = body.name.trim();
+    let category = body.category.trim();
+    if name.is_empty() || category.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "category and name required"}));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let order_index: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(order_index), -1) + 1 FROM subsections WHERE category = ?1",
+            rusqlite::params![category],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT OR IGNORE INTO subsections (category, name, created_at, order_index) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![category, name, now, order_index],
+    )
+    .unwrap();
+    HttpResponse::Created().json(Subsection {
+        category: category.to_string(),
+        name: name.to_string(),
+        created_at: now,
+        order_index,
+    })
+}
+
+async fn reorder_subsections(
+    data: web::Data<AppState>,
+    body: web::Json<ReorderSubsectionsBody>,
+) -> HttpResponse {
+    let mut conn = data.db.lock().unwrap();
+    let tx = conn.transaction().unwrap();
+    for (i, name) in body.names.iter().enumerate() {
+        tx.execute(
+            "UPDATE subsections SET order_index = ?1 WHERE category = ?2 AND name = ?3",
+            rusqlite::params![i as i64, body.category, name],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+    HttpResponse::Ok().json(serde_json::json!({"ok": true, "count": body.names.len()}))
+}
+
+async fn delete_subsection(
+    data: web::Data<AppState>,
+    query: web::Query<SubsectionQuery>,
+) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    conn.execute(
+        "DELETE FROM subsections WHERE category = ?1 AND name = ?2",
+        rusqlite::params![query.category, query.name],
+    )
+    .unwrap();
+    // Unassign any files that referenced this subsection
+    conn.execute(
+        "UPDATE project_files SET subsection = NULL WHERE category = ?1 AND subsection = ?2",
+        rusqlite::params![query.category, query.name],
+    )
+    .unwrap();
+    HttpResponse::Ok().json(serde_json::json!({"deleted": query.name}))
+}
+
+async fn upsert_course(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<UpdateCourseBody>,
+) -> HttpResponse {
+    let conn = data.db.lock().unwrap();
+    let name = path.into_inner();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    conn.execute(
+        "INSERT INTO course_meta (name, exam_deadline, created_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(name) DO UPDATE SET exam_deadline = excluded.exam_deadline",
+        rusqlite::params![name, body.exam_deadline, now],
+    )
+    .unwrap();
+
+    HttpResponse::Ok().json(CourseInfo {
+        name,
+        exam_deadline: body.exam_deadline.clone(),
+    })
+}
+
 // ── Main ──
 
 #[actix_web::main]
@@ -980,25 +1341,37 @@ async fn main() -> std::io::Result<()> {
             .wrap(cors)
             .app_data(data.clone())
             .app_data(web::JsonConfig::default().limit(20 * 1024 * 1024))
-            .route("/api/projects", web::get().to(get_projects))
-            .route("/api/projects", web::post().to(create_project))
-            .route("/api/projects/{id}", web::put().to(update_project))
-            .route("/api/projects/{id}", web::delete().to(delete_project))
-            .route("/api/tasks", web::get().to(get_tasks))
-            .route("/api/tasks", web::post().to(create_task))
-            .route("/api/tasks/{id}", web::put().to(update_task))
-            .route("/api/tasks/{id}", web::delete().to(delete_task))
-            .route("/api/tasks/bulk", web::post().to(bulk_create_tasks))
-            .route("/api/projects/{id}/ai/generate-tasks", web::post().to(generate_tasks_ai))
-            .route("/api/ai/project-from-pdf", web::post().to(project_from_pdf))
-            .route("/api/projects/{id}/ai/manual-prompt", web::post().to(manual_prompt_tasks))
-            .route("/api/ai/manual-prompt/project", web::post().to(manual_prompt_project))
-            .route("/api/ai/status", web::get().to(ai_status))
-            .route("/api/courses", web::get().to(get_courses))
-            .route("/api/projects/{id}/files", web::get().to(get_project_files))
-            .route("/api/project-files", web::post().to(create_project_file))
-            .route("/api/project-files/upload", web::post().to(upload_project_file))
-            .route("/api/project-files/{id}", web::delete().to(delete_project_file))
+            // ── Project tracker API ──
+            .route("/api/project_tracker/projects", web::get().to(get_projects))
+            .route("/api/project_tracker/projects", web::post().to(create_project))
+            .route("/api/project_tracker/projects/{id}", web::put().to(update_project))
+            .route("/api/project_tracker/projects/{id}", web::delete().to(delete_project))
+            .route("/api/project_tracker/tasks", web::get().to(get_tasks))
+            .route("/api/project_tracker/tasks", web::post().to(create_task))
+            .route("/api/project_tracker/tasks/{id}", web::put().to(update_task))
+            .route("/api/project_tracker/tasks/{id}", web::delete().to(delete_task))
+            .route("/api/project_tracker/tasks/bulk", web::post().to(bulk_create_tasks))
+            .route("/api/project_tracker/projects/{id}/ai/generate-tasks", web::post().to(generate_tasks_ai))
+            .route("/api/project_tracker/ai/project-from-pdf", web::post().to(project_from_pdf))
+            .route("/api/project_tracker/projects/{id}/ai/manual-prompt", web::post().to(manual_prompt_tasks))
+            .route("/api/project_tracker/ai/manual-prompt/project", web::post().to(manual_prompt_project))
+            .route("/api/project_tracker/ai/status", web::get().to(ai_status))
+            .route("/api/project_tracker/courses", web::get().to(get_courses))
+            .route("/api/project_tracker/projects/{id}/files", web::get().to(get_project_files))
+            .route("/api/project_tracker/project-files", web::post().to(create_project_file))
+            .route("/api/project_tracker/project-files/upload", web::post().to(upload_project_file))
+            .route("/api/project_tracker/project-files/order", web::post().to(reorder_project_files))
+            .route("/api/project_tracker/project-files/{id}", web::put().to(update_project_file))
+            .route("/api/project_tracker/project-files/{id}", web::delete().to(delete_project_file))
+            // ── Course library API ──
+            .route("/api/course/list", web::get().to(get_courses_detailed))
+            .route("/api/course/files", web::get().to(get_all_files))
+            .route("/api/course/subsections", web::get().to(get_subsections))
+            .route("/api/course/subsections", web::post().to(create_subsection))
+            .route("/api/course/subsections", web::delete().to(delete_subsection))
+            .route("/api/course/subsections/order", web::post().to(reorder_subsections))
+            .route("/api/course/{name}", web::put().to(upsert_course))
+            // ── Shared file serving ──
             .route("/api/files/{filename}", web::get().to(serve_file))
             .service(Files::new("/", "./static").index_file("index.html"))
     })

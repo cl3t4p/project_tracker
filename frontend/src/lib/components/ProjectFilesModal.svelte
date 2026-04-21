@@ -1,7 +1,20 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import { projectFiles } from '../stores.js';
-  import { fetchProjectFiles, createProjectFile, uploadProjectFile, deleteProjectFile, fileToBase64 } from '../api.js';
+  import {
+    fetchProjectFiles, createProjectFile, uploadProjectFile, deleteProjectFile,
+    updateProjectFile, fetchSubsections, fileToBase64,
+  } from '../api.js';
+
+  let subsections = [];
+
+  const CATEGORIES = [
+    { key: 'course',     title: 'Course material' },
+    { key: 'assignment', title: 'Assignment' },
+    { key: 'lab',        title: 'Lab' },
+    { key: 'exam',       title: 'Exam prep' },
+    { key: 'other',      title: 'Other' },
+  ];
 
   export let project;
 
@@ -12,10 +25,16 @@
   let showAddFile = false;
   let linkName = '';
   let linkUrl = '';
+  let linkCategory = 'other';
+  let linkSub = '';
   let pdfName = '';
   let pdfFile = null;
+  let pdfCategory = 'course';
+  let pdfSub = '';
   let fileName = '';
   let fileBlob = null;
+  let fileCategory = 'other';
+  let fileSub = '';
   let uploading = false;
   let uploadingFile = false;
 
@@ -27,6 +46,11 @@
 
   async function loadFiles() {
     $projectFiles = await fetchProjectFiles(project.id);
+    subsections = await fetchSubsections();
+  }
+
+  function subsFor(catKey) {
+    return subsections.filter((s) => s.category === catKey).map((s) => s.name);
   }
 
   async function handleAddLink() {
@@ -36,9 +60,11 @@
       name: linkName.trim(),
       file_type: 'link',
       url: linkUrl.trim(),
+      category: linkCategory,
     });
     linkName = '';
     linkUrl = '';
+    linkCategory = 'other';
     showAddLink = false;
     await loadFiles();
   }
@@ -48,9 +74,10 @@
     uploading = true;
     try {
       const b64 = await fileToBase64(pdfFile);
-      await uploadProjectFile(project.id, pdfName.trim(), b64, pdfFile.name);
+      await uploadProjectFile(project.id, pdfName.trim(), b64, pdfFile.name, pdfCategory);
       pdfName = '';
       pdfFile = null;
+      pdfCategory = 'course';
       showAddPdf = false;
       await loadFiles();
     } finally {
@@ -64,14 +91,26 @@
     try {
       const b64 = await fileToBase64(fileBlob);
       const displayName = fileName.trim() || fileBlob.name;
-      await uploadProjectFile(project.id, displayName, b64, fileBlob.name);
+      await uploadProjectFile(project.id, displayName, b64, fileBlob.name, fileCategory);
       fileName = '';
       fileBlob = null;
+      fileCategory = 'other';
       showAddFile = false;
       await loadFiles();
     } finally {
       uploadingFile = false;
     }
+  }
+
+  async function changeCategory(file, category) {
+    if (category === file.category) return;
+    await updateProjectFile(file.id, { category, subsection: null });
+    await loadFiles();
+  }
+
+  async function changeSubsection(file, sub) {
+    await updateProjectFile(file.id, { subsection: sub || null });
+    await loadFiles();
   }
 
   async function handleDeleteFile(file) {
@@ -119,6 +158,9 @@
           <form class="add-form" on:submit|preventDefault={handleAddLink}>
             <input type="text" bind:value={linkName} placeholder="Link name" required />
             <input type="url" bind:value={linkUrl} placeholder="https://..." required />
+            <select bind:value={linkCategory}>
+              {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+            </select>
             <div class="form-actions">
               <button type="submit" class="btn-save-small">Add</button>
             </div>
@@ -130,6 +172,9 @@
             <div class="file-item">
               <span class="file-icon">&#128279;</span>
               <a href={link.url} target="_blank" rel="noopener noreferrer" class="file-name">{link.name}</a>
+              <select class="cat-inline" value={link.category || 'other'} on:change={(e) => changeCategory(link, e.target.value)} title="Category">
+                {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+              </select>
               <button class="btn-remove" on:click={() => handleDeleteFile(link)} title="Remove">&#x2715;</button>
             </div>
           {:else}
@@ -150,6 +195,9 @@
           <form class="add-form" on:submit|preventDefault={handleAddPdf}>
             <input type="text" bind:value={pdfName} placeholder="PDF name" required />
             <input type="file" accept=".pdf" on:change={e => pdfFile = e.target.files[0]} required />
+            <select bind:value={pdfCategory}>
+              {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+            </select>
             <div class="form-actions">
               <button type="submit" class="btn-save-small" disabled={uploading}>
                 {uploading ? 'Uploading...' : 'Upload'}
@@ -164,6 +212,9 @@
               <span class="file-icon">&#128196;</span>
               <a href={pdf.url} target="_blank" rel="noopener noreferrer" class="file-name">{pdf.name}</a>
               {#if fileExt(pdf)}<span class="file-ext">.{fileExt(pdf)}</span>{/if}
+              <select class="cat-inline" value={pdf.category || 'other'} on:change={(e) => changeCategory(pdf, e.target.value)} title="Category">
+                {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+              </select>
               <button class="btn-remove" on:click={() => handleDeleteFile(pdf)} title="Remove">&#x2715;</button>
             </div>
           {:else}
@@ -184,6 +235,9 @@
           <form class="add-form" on:submit|preventDefault={handleAddFile}>
             <input type="text" bind:value={fileName} placeholder="Display name (optional)" />
             <input type="file" on:change={e => fileBlob = e.target.files[0]} required />
+            <select bind:value={fileCategory}>
+              {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+            </select>
             <div class="form-actions">
               <button type="submit" class="btn-save-small" disabled={uploadingFile}>
                 {uploadingFile ? 'Uploading...' : 'Upload'}
@@ -198,6 +252,9 @@
               <span class="file-icon">&#128206;</span>
               <a href={file.url} target="_blank" rel="noopener noreferrer" class="file-name">{file.name}</a>
               {#if fileExt(file)}<span class="file-ext">.{fileExt(file)}</span>{/if}
+              <select class="cat-inline" value={file.category || 'other'} on:change={(e) => changeCategory(file, e.target.value)} title="Category">
+                {#each CATEGORIES as c}<option value={c.key}>{c.title}</option>{/each}
+              </select>
               <button class="btn-remove" on:click={() => handleDeleteFile(file)} title="Remove">&#x2715;</button>
             </div>
           {:else}
@@ -330,7 +387,8 @@
   }
 
   .add-form input[type='text'],
-  .add-form input[type='url'] {
+  .add-form input[type='url'],
+  .add-form select {
     padding: 0.5rem 0.65rem;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -338,6 +396,17 @@
     color: var(--text);
     font-size: 0.85rem;
     font-family: inherit;
+  }
+
+  .cat-inline {
+    padding: 0.2rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+    cursor: pointer;
+    flex-shrink: 0;
   }
 
   .add-form input[type='file'] {

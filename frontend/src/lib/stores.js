@@ -12,8 +12,15 @@ export const filterSearch = writable('');
 // Sidebar
 export const sidebarOpen = writable(true);
 
-// Current view: 'board' or { page: 'project', projectId: '...' }
+// Current view: 'board', 'courses', or { page: 'project', projectId: '...' }
 export const currentView = writable('board');
+
+// All project files with context (for the courses/library page)
+export const allFiles = writable([]);
+// Courses with exam deadline info (for the courses page)
+export const coursesDetailed = writable([]);
+// User-defined subsections (per category)
+export const subsections = writable([]);
 
 // Project files (loaded when viewing a project detail page)
 export const projectFiles = writable([]);

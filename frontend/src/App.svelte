@@ -15,6 +15,7 @@
   import AiProjectPdfModal from './lib/components/AiProjectPdfModal.svelte';
   import ProjectDetailPage from './lib/components/ProjectDetailPage.svelte';
   import ProjectFilesModal from './lib/components/ProjectFilesModal.svelte';
+  import CoursesPage from './lib/components/CoursesPage.svelte';
 
   let showTaskModal = false;
   let editingTask = null;
@@ -31,12 +32,36 @@
     { status: 'done', title: 'Done' },
   ];
 
-  onMount(loadData);
+  onMount(() => {
+    loadData();
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  });
 
   async function loadData() {
     $projects = await fetchProjects();
     $tasks = await fetchTasks();
     $courses = await fetchCourses();
+  }
+
+  // ── Hash routing ──
+  // Supported hashes: #/project_tracker, #/courses, #/project_tracker/project/<id>
+  function applyHash() {
+    const h = window.location.hash || '#/project_tracker';
+    if (h.startsWith('#/courses')) {
+      $currentView = 'courses';
+    } else if (h.startsWith('#/project_tracker/project/')) {
+      const id = h.slice('#/project_tracker/project/'.length);
+      $currentView = { page: 'project', projectId: id };
+    } else {
+      $currentView = 'board';
+    }
+  }
+
+  function goto(hash) {
+    if (window.location.hash !== hash) window.location.hash = hash;
+    else applyHash();
   }
 
   // Task handlers
@@ -112,12 +137,15 @@
     ? $projects.find(p => p.id === $currentView.projectId) || null
     : null;
 
+  $: isCourses = $currentView === 'courses';
+  $: isBoard = $currentView === 'board';
+
   function openProjectDetail(e) {
-    $currentView = { page: 'project', projectId: e.detail.id };
+    goto(`#/project_tracker/project/${e.detail.id}`);
   }
 
   function handleBackToBoard() {
-    $currentView = 'board';
+    goto('#/project_tracker');
   }
 
   // Files modal
@@ -140,46 +168,64 @@
 <div class="app">
   <header>
     <div class="header-left">
-      {#if !$sidebarOpen}
+      {#if !$sidebarOpen && !isCourses}
         <button class="btn-sidebar" on:click={() => ($sidebarOpen = true)} title="Show projects">
           &#9776;
         </button>
       {/if}
-      <h1>Uni Project Tracker</h1>
+      <h1>University Tracker</h1>
+      <nav class="nav-tabs">
+        <button
+          class="nav-tab"
+          class:active={isBoard || !!viewProject}
+          on:click={() => goto('#/project_tracker')}
+        >Project Tracker</button>
+        <button
+          class="nav-tab"
+          class:active={isCourses}
+          on:click={() => goto('#/courses')}
+        >Courses</button>
+      </nav>
     </div>
     <div class="header-right">
-      <Filters />
-      <button class="btn-add" on:click={openNewTask}>+ New Task</button>
+      {#if !isCourses}
+        <Filters />
+        <button class="btn-add" on:click={openNewTask}>+ New Task</button>
+      {/if}
     </div>
   </header>
 
   <div class="content">
-    <Sidebar
-      on:newProject={openNewProject}
-      on:editProject={openEditProject}
-      on:newProjectFromPdf={openAiPdf}
-      on:openProject={openProjectDetail}
-      on:openFiles={openFilesModal}
-    />
-
-    {#if viewProject}
-      <ProjectDetailPage
-        project={viewProject}
-        on:back={handleBackToBoard}
-        on:editProject={(e) => openEditProject(e)}
+    {#if isCourses}
+      <CoursesPage on:openProject={openProjectDetail} />
+    {:else}
+      <Sidebar
+        on:newProject={openNewProject}
+        on:editProject={openEditProject}
+        on:newProjectFromPdf={openAiPdf}
+        on:openProject={openProjectDetail}
         on:openFiles={openFilesModal}
       />
-    {:else}
-      <main class="board">
-        {#each columns as col}
-          <Column
-            status={col.status}
-            title={col.title}
-            on:edit={openEditTask}
-            on:drop={handleDrop}
-          />
-        {/each}
-      </main>
+
+      {#if viewProject}
+        <ProjectDetailPage
+          project={viewProject}
+          on:back={handleBackToBoard}
+          on:editProject={(e) => openEditProject(e)}
+          on:openFiles={openFilesModal}
+        />
+      {:else}
+        <main class="board">
+          {#each columns as col}
+            <Column
+              status={col.status}
+              title={col.title}
+              on:edit={openEditTask}
+              on:drop={handleDrop}
+            />
+          {/each}
+        </main>
+      {/if}
     {/if}
   </div>
 </div>
@@ -255,6 +301,36 @@
     font-size: 1.2rem;
     font-weight: 800;
     color: var(--text);
+  }
+
+  .nav-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-left: 0.75rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--border);
+  }
+
+  .nav-tab {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+
+  .nav-tab:hover {
+    background: var(--muted);
+    color: var(--text);
+  }
+
+  .nav-tab.active {
+    background: var(--accent);
+    color: white;
   }
 
   .btn-sidebar {

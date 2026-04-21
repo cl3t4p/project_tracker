@@ -1,14 +1,15 @@
-const BASE = '/api';
+const PT = '/api/project_tracker';
+const CO = '/api/course';
 
 // ── Projects ──
 
 export async function fetchProjects() {
-  const res = await fetch(`${BASE}/projects`);
+  const res = await fetch(`${PT}/projects`);
   return res.json();
 }
 
 export async function createProject(project) {
-  const res = await fetch(`${BASE}/projects`, {
+  const res = await fetch(`${PT}/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(project),
@@ -17,7 +18,7 @@ export async function createProject(project) {
 }
 
 export async function updateProject(id, updates) {
-  const res = await fetch(`${BASE}/projects/${id}`, {
+  const res = await fetch(`${PT}/projects/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -26,18 +27,18 @@ export async function updateProject(id, updates) {
 }
 
 export async function deleteProject(id) {
-  await fetch(`${BASE}/projects/${id}`, { method: 'DELETE' });
+  await fetch(`${PT}/projects/${id}`, { method: 'DELETE' });
 }
 
 // ── Tasks ──
 
 export async function fetchTasks() {
-  const res = await fetch(`${BASE}/tasks`);
+  const res = await fetch(`${PT}/tasks`);
   return res.json();
 }
 
 export async function createTask(task) {
-  const res = await fetch(`${BASE}/tasks`, {
+  const res = await fetch(`${PT}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(task),
@@ -46,7 +47,7 @@ export async function createTask(task) {
 }
 
 export async function updateTask(id, updates) {
-  const res = await fetch(`${BASE}/tasks/${id}`, {
+  const res = await fetch(`${PT}/tasks/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -55,25 +56,81 @@ export async function updateTask(id, updates) {
 }
 
 export async function deleteTask(id) {
-  await fetch(`${BASE}/tasks/${id}`, { method: 'DELETE' });
+  await fetch(`${PT}/tasks/${id}`, { method: 'DELETE' });
 }
 
-// ── Courses ──
+// ── Courses (name list used by forms) ──
 
 export async function fetchCourses() {
-  const res = await fetch(`${BASE}/courses`);
+  const res = await fetch(`${PT}/courses`);
   return res.json();
+}
+
+// ── Courses (detailed, with exam deadlines) ──
+
+export async function fetchCoursesDetailed() {
+  const res = await fetch(`${CO}/list`);
+  return res.json();
+}
+
+export async function updateCourseExamDeadline(name, examDeadline) {
+  const res = await fetch(`${CO}/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ exam_deadline: examDeadline || null }),
+  });
+  return res.json();
+}
+
+export async function fetchAllFiles() {
+  const res = await fetch(`${CO}/files`);
+  return res.json();
+}
+
+export async function fetchSubsections() {
+  const res = await fetch(`${CO}/subsections`);
+  return res.json();
+}
+
+export async function createSubsection(category, name) {
+  const res = await fetch(`${CO}/subsections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category, name }),
+  });
+  return res.json();
+}
+
+export async function deleteSubsection(category, name) {
+  const params = new URLSearchParams({ category, name });
+  await fetch(`${CO}/subsections?${params}`, { method: 'DELETE' });
+}
+
+export async function reorderSubsections(category, names) {
+  await fetch(`${CO}/subsections/order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category, names }),
+  });
+}
+
+export async function reorderProjectFiles(ids) {
+  await fetch(`${PT}/project-files/order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
 }
 
 // ── Project Files ──
 
 export async function fetchProjectFiles(projectId) {
-  const res = await fetch(`${BASE}/projects/${projectId}/files`);
+  const res = await fetch(`${PT}/projects/${projectId}/files`);
   return res.json();
 }
 
 export async function createProjectFile(file) {
-  const res = await fetch(`${BASE}/project-files`, {
+  const res = await fetch(`${PT}/project-files`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(file),
@@ -81,17 +138,26 @@ export async function createProjectFile(file) {
   return res.json();
 }
 
-export async function uploadProjectFile(projectId, name, dataBase64, filename = null) {
-  const res = await fetch(`${BASE}/project-files/upload`, {
+export async function uploadProjectFile(projectId, name, dataBase64, filename = null, category = 'other', subsection = null) {
+  const res = await fetch(`${PT}/project-files/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, name, data_base64: dataBase64, filename }),
+    body: JSON.stringify({ project_id: projectId, name, data_base64: dataBase64, filename, category, subsection }),
+  });
+  return res.json();
+}
+
+export async function updateProjectFile(id, updates) {
+  const res = await fetch(`${PT}/project-files/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
   });
   return res.json();
 }
 
 export async function deleteProjectFile(id) {
-  await fetch(`${BASE}/project-files/${id}`, { method: 'DELETE' });
+  await fetch(`${PT}/project-files/${id}`, { method: 'DELETE' });
 }
 
 // ── AI ──
@@ -100,7 +166,7 @@ export async function aiGenerateTasks(
   projectId,
   { count = 5, pdfBase64 = null, startDate = '', deadline = '' } = {},
 ) {
-  const res = await fetch(`${BASE}/projects/${projectId}/ai/generate-tasks`, {
+  const res = await fetch(`${PT}/projects/${projectId}/ai/generate-tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -116,7 +182,7 @@ export async function aiGenerateTasks(
 
 export async function aiStatus() {
   try {
-    const res = await fetch(`${BASE}/ai/status`);
+    const res = await fetch(`${PT}/ai/status`);
     if (!res.ok) return { configured: false };
     return res.json();
   } catch {
@@ -125,7 +191,7 @@ export async function aiStatus() {
 }
 
 export async function aiProjectFromPdf(pdfBase64, count = 6) {
-  const res = await fetch(`${BASE}/ai/project-from-pdf`, {
+  const res = await fetch(`${PT}/ai/project-from-pdf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pdf_base64: pdfBase64, count }),
@@ -135,7 +201,7 @@ export async function aiProjectFromPdf(pdfBase64, count = 6) {
 }
 
 export async function createTasksBulk(projectId, tasks) {
-  const res = await fetch(`${BASE}/tasks/bulk`, {
+  const res = await fetch(`${PT}/tasks/bulk`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, tasks }),
@@ -148,7 +214,7 @@ export async function aiManualPromptTasks(
   projectId,
   { count = 5, startDate = '', deadline = '' } = {},
 ) {
-  const res = await fetch(`${BASE}/projects/${projectId}/ai/manual-prompt`, {
+  const res = await fetch(`${PT}/projects/${projectId}/ai/manual-prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ count, start_date: startDate, deadline }),
@@ -158,7 +224,7 @@ export async function aiManualPromptTasks(
 }
 
 export async function aiManualPromptProject(count = 6) {
-  const res = await fetch(`${BASE}/ai/manual-prompt/project`, {
+  const res = await fetch(`${PT}/ai/manual-prompt/project`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ count }),
