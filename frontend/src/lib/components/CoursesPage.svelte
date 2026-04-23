@@ -18,6 +18,7 @@
   const dispatch = createEventDispatcher();
 
   let search = '';
+  let filterCourse = '';
   let editingCourse = null;
   let editingDeadline = '';
   let addingSubFor = null; // category key currently showing the add-sub input
@@ -122,15 +123,17 @@
 
   $: filteredFiles = (() => {
     const q = search.trim().toLowerCase();
-    if (!q) return $allFiles;
-    return $allFiles.filter(
-      (f) =>
+    return $allFiles.filter((f) => {
+      if (filterCourse && (f.course || '') !== filterCourse) return false;
+      if (!q) return true;
+      return (
         f.name.toLowerCase().includes(q) ||
         (f.project_name || '').toLowerCase().includes(q) ||
         (f.course || '').toLowerCase().includes(q) ||
         (f.category || '').toLowerCase().includes(q) ||
-        (f.file_type || '').toLowerCase().includes(q),
-    );
+        (f.file_type || '').toLowerCase().includes(q)
+      );
+    });
   })();
 
   // Reactive index keyed by category: { files, groups: [ [subName, files[]] ] }
@@ -240,12 +243,21 @@
   <main class="library">
     <div class="library-header">
       <h2>Course Library</h2>
+      <select class="course-filter" bind:value={filterCourse} title="Filter by course">
+        <option value="">All courses</option>
+        {#each $coursesDetailed as c (c.name)}
+          <option value={c.name}>{c.name}</option>
+        {/each}
+      </select>
       <input
         type="search"
         class="search"
         placeholder="Search files, links, projects..."
         bind:value={search}
       />
+      {#if filterCourse || search}
+        <button class="clear-btn" on:click={() => { filterCourse = ''; search = ''; }}>Clear</button>
+      {/if}
     </div>
 
     <div class="columns">
@@ -491,6 +503,35 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
   }
+
+  .course-filter {
+    padding: 0.55rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.88rem;
+    cursor: pointer;
+    max-width: 220px;
+  }
+
+  .course-filter:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+
+  .clear-btn {
+    padding: 0.55rem 0.9rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--muted);
+    color: var(--text);
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  .clear-btn:hover { background: var(--border); }
 
   .columns {
     display: flex;

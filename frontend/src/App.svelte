@@ -173,13 +173,13 @@
           &#9776;
         </button>
       {/if}
-      <h1>University Tracker</h1>
+      <h1>Study Board</h1>
       <nav class="nav-tabs">
         <button
           class="nav-tab"
           class:active={isBoard || !!viewProject}
           on:click={() => goto('#/project_tracker')}
-        >Project Tracker</button>
+        >Projects</button>
         <button
           class="nav-tab"
           class:active={isCourses}

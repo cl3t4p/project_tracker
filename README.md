@@ -1,6 +1,6 @@
-# Project Tracker
+# Study Board
 
-A lightweight kanban-style project tracker for coursework. Each project has
+A lightweight kanban-style study board for coursework. Each project has
 deadlines, tasks across a `todo → in-progress → review → done` board, and an
 attached library of links and PDFs that individual tasks can reference.
 
