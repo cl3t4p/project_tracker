@@ -13,6 +13,9 @@
     updateCourseExamDeadline,
     updateProjectFile,
     deleteProjectFile,
+    createProjectFile,
+    uploadProjectFile,
+    fileToBase64,
   } from '../api.js';
 
   const dispatch = createEventDispatcher();
@@ -24,6 +27,16 @@
   let addingSubFor = null; // category key currently showing the add-sub input
   let newSubName = '';
   let collapsed = {}; // `${category}|${sub}` → bool
+
+  let showAddFile = false;
+  let addingFile = false;
+  let newFileProjectId = '';
+  let newFileType = 'link';
+  let newFileName = '';
+  let newFileUrl = '';
+  let newFileBlob = null;
+  let newFileCategory = 'other';
+  let newFileSubsection = '';
 
   const CATEGORIES = [
     { key: 'course',     title: 'Course material', icon: '\u{1F4DA}' },
@@ -237,7 +250,77 @@
   function openProject(p) {
     dispatch('openProject', p);
   }
+
+  function openAddFile(catKey = 'other') {
+    newFileProjectId = $projects[0]?.id || '';
+    newFileType = 'link';
+    newFileName = '';
+    newFileUrl = '';
+    newFileBlob = null;
+    newFileCategory = catKey;
+    newFileSubsection = '';
+    showAddFile = true;
+  }
+
+  function closeAddFile() {
+    if (addingFile) return;
+    showAddFile = false;
+  }
+
+  async function submitAddFile() {
+    if (!newFileProjectId) return;
+    const sub = newFileSubsection || null;
+    addingFile = true;
+    try {
+      if (newFileType === 'link') {
+        const name = newFileName.trim();
+        const url = newFileUrl.trim();
+        if (!name || !url) return;
+        const created = await createProjectFile({
+          project_id: newFileProjectId,
+          name,
+          file_type: 'link',
+          url,
+          category: newFileCategory,
+          subsection: sub,
+        });
+        if (sub && created?.id) {
+          await updateProjectFile(created.id, { subsection: sub });
+        }
+      } else {
+        if (!newFileBlob) return;
+        const b64 = await fileToBase64(newFileBlob);
+        const displayName = newFileName.trim() || newFileBlob.name;
+        const created = await uploadProjectFile(
+          newFileProjectId,
+          displayName,
+          b64,
+          newFileBlob.name,
+          newFileCategory,
+          sub,
+        );
+        if (sub && created?.id) {
+          await updateProjectFile(created.id, { subsection: sub });
+        }
+      }
+      showAddFile = false;
+      await loadData();
+    } finally {
+      addingFile = false;
+    }
+  }
+
+  function handleAddFileKeydown(e) {
+    if (e.key === 'Escape' && showAddFile) closeAddFile();
+  }
+
+  $: subsForNewFile = subsForCategory(newFileCategory);
+  $: if (showAddFile && newFileSubsection && !subsForNewFile.includes(newFileSubsection)) {
+    newFileSubsection = '';
+  }
 </script>
+
+<svelte:window on:keydown={handleAddFileKeydown} />
 
 <div class="courses-page">
   <main class="library">
@@ -258,6 +341,9 @@
       {#if filterCourse || search}
         <button class="clear-btn" on:click={() => { filterCourse = ''; search = ''; }}>Clear</button>
       {/if}
+      <button class="add-file-btn" on:click={() => openAddFile()} disabled={$projects.length === 0} title={$projects.length === 0 ? 'Create a project first' : 'Add file'}>
+        + Add file
+      </button>
     </div>
 
     <div class="columns">
@@ -364,6 +450,8 @@
                                 <option value={s}>{s}</option>
                               {/each}
                             </select>
+                          </div>
+                          <div class="file-btns">
                             <button class="btn-move" on:click={() => moveFile(f, -1)} title="Move up">&#9650;</button>
                             <button class="btn-move" on:click={() => moveFile(f, 1)} title="Move down">&#9660;</button>
                             <button class="btn-remove" on:click={() => removeFile(f)} title="Remove">&#x2715;</button>
@@ -455,6 +543,100 @@
   </aside>
 </div>
 
+{#if showAddFile}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="overlay" on:click|self={closeAddFile}>
+    <div class="add-modal" role="dialog" aria-modal="true">
+      <div class="add-modal-header">
+        <h3>Add file to library</h3>
+        <button class="btn-close" on:click={closeAddFile} title="Close">&#x2715;</button>
+      </div>
+
+      <form class="add-modal-body" on:submit|preventDefault={submitAddFile}>
+        <label>
+          <span>Project <em>*</em></span>
+          <select bind:value={newFileProjectId} required>
+            <option value="" disabled>Select a project</option>
+            {#each $projects as p (p.id)}
+              <option value={p.id}>{p.name} ({p.course})</option>
+            {/each}
+          </select>
+        </label>
+
+        <div class="type-row">
+          <label class="type-opt" class:active={newFileType === 'link'}>
+            <input type="radio" bind:group={newFileType} value="link" />
+            <span>&#128279; Link</span>
+          </label>
+          <label class="type-opt" class:active={newFileType === 'pdf'}>
+            <input type="radio" bind:group={newFileType} value="pdf" />
+            <span>&#128196; PDF</span>
+          </label>
+          <label class="type-opt" class:active={newFileType === 'file'}>
+            <input type="radio" bind:group={newFileType} value="file" />
+            <span>&#128206; File</span>
+          </label>
+        </div>
+
+        <label>
+          <span>{newFileType === 'link' ? 'Name' : 'Display name'} {#if newFileType === 'link'}<em>*</em>{/if}</span>
+          <input
+            type="text"
+            bind:value={newFileName}
+            placeholder={newFileType === 'link' ? 'Link name' : 'Optional display name'}
+            required={newFileType === 'link'}
+          />
+        </label>
+
+        {#if newFileType === 'link'}
+          <label>
+            <span>URL <em>*</em></span>
+            <input type="url" bind:value={newFileUrl} placeholder="https://..." required />
+          </label>
+        {:else}
+          <label>
+            <span>File <em>*</em></span>
+            <input
+              type="file"
+              accept={newFileType === 'pdf' ? '.pdf' : undefined}
+              on:change={(e) => (newFileBlob = e.target.files[0] || null)}
+              required
+            />
+          </label>
+        {/if}
+
+        <div class="row">
+          <label class="flex-1">
+            <span>Category</span>
+            <select bind:value={newFileCategory}>
+              {#each CATEGORIES as c}
+                <option value={c.key}>{c.title}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="flex-1">
+            <span>Subsection</span>
+            <select bind:value={newFileSubsection}>
+              <option value="">— Unfiled —</option>
+              {#each subsForNewFile as s}
+                <option value={s}>{s}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+
+        <div class="add-modal-actions">
+          <button type="button" class="btn-cancel" on:click={closeAddFile} disabled={addingFile}>Cancel</button>
+          <button type="submit" class="btn-save" disabled={addingFile || !newFileProjectId}>
+            {addingFile ? 'Adding…' : 'Add file'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
 <style>
   .courses-page {
     display: flex;
@@ -532,6 +714,21 @@
   }
 
   .clear-btn:hover { background: var(--border); }
+
+  .add-file-btn {
+    padding: 0.55rem 0.95rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: white;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .add-file-btn:hover:not(:disabled) { opacity: 0.9; }
+  .add-file-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .columns {
     display: flex;
@@ -800,13 +997,20 @@
 
   .file-actions {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.3rem;
+  }
+
+  .file-btns {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.25rem;
   }
 
   .cat-select {
     flex: 1;
+    min-width: 0;
     padding: 0.25rem 0.35rem;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1031,4 +1235,153 @@
     font-style: italic;
     padding: 0.4rem 0;
   }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1rem;
+  }
+
+  .add-modal {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 460px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+  }
+
+  .add-modal-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .add-modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .btn-close {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 26px;
+    height: 26px;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-close:hover { background: var(--muted); color: var(--text); }
+
+  .add-modal-body {
+    padding: 1rem 1.25rem 1.25rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .add-modal-body label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .add-modal-body label em { color: #ef4444; font-style: normal; }
+
+  .add-modal-body input[type='text'],
+  .add-modal-body input[type='url'],
+  .add-modal-body input[type='file'],
+  .add-modal-body select {
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+
+  .add-modal-body input:focus,
+  .add-modal-body select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+
+  .type-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .type-opt {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0.45rem 0.5rem;
+    background: var(--bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .type-opt input { display: none; }
+
+  .type-opt.active {
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .row { display: flex; gap: 0.6rem; }
+  .flex-1 { flex: 1; min-width: 0; }
+
+  .add-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .btn-cancel,
+  .btn-save {
+    padding: 0.5rem 1.1rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-cancel { background: var(--muted); color: var(--text); }
+  .btn-cancel:hover:not(:disabled) { background: var(--border); }
+  .btn-save { background: var(--accent); color: white; }
+  .btn-save:hover:not(:disabled) { opacity: 0.9; }
+  .btn-save:disabled,
+  .btn-cancel:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
